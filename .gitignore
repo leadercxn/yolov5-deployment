@@ -117,6 +117,8 @@ coverage.xml
 *.cover
 .hypothesis/
 
+*__pycache__
+
 # Translations
 *.mo
 *.pot
