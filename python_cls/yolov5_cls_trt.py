@@ -6,6 +6,7 @@ import shutil
 import sys
 import threading
 import time
+from turtle import done
 import cv2
 import numpy as np
 import torch
@@ -13,6 +14,11 @@ import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
 
+import argparse
+from multiprocessing import Process
+import subprocess
+import threading
+from dataloaders import LoadImages,LoadWebcam,LoadStreams
 
 def get_img_path_batches(batch_size, img_dir):
     ret = []
@@ -101,15 +107,23 @@ class YoLov5TRT(object):
         host_outputs = self.host_outputs
         cuda_outputs = self.cuda_outputs
         bindings = self.bindings
+
         # Do image preprocess
         batch_image_raw = []
-        batch_input_image = np.empty(
-            shape=[self.batch_size, 3, self.input_h, self.input_w])
+        batch_input_image = np.empty(shape=[self.batch_size, 3, self.input_h, self.input_w])
+
+        '''
         for i, image_raw in enumerate(raw_image_generator):
             batch_image_raw.append(image_raw)
             input_image = self.preprocess_cls_image(image_raw)
             np.copyto(batch_input_image[i], input_image)
+        '''
+
+        input_image = self.preprocess_cls_image(raw_image_generator)
+        np.copyto(batch_input_image, input_image)
+
         batch_input_image = np.ascontiguousarray(batch_input_image)
+        raw_image = np.ascontiguousarray(input_image)
 
         # Copy input image to host buffer
         np.copyto(host_inputs[0], batch_input_image.ravel())
@@ -130,11 +144,18 @@ class YoLov5TRT(object):
         output = host_outputs[0]
         # Do postprocess
         for i in range(self.batch_size):
-            classes_ls, predicted_conf_ls, category_id_ls = self.postprocess_cls(
-                output)
-            cv2.putText(batch_image_raw[i], str(classes_ls), (10, 40), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1, cv2.LINE_AA)
+            classes_ls, predicted_conf_ls, category_id_ls = self.postprocess_cls(output)
+
+        return str(classes_ls)
+
+        '''
+            cv2.putText(raw_image, str(classes_ls), (10, 40), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0), 1, cv2.LINE_AA)
             print(classes_ls, predicted_conf_ls)
+            cv2.imshow('yolov5-cls', raw_image)  # 显示读取到的这一帧画面
+            cv2.waitKey(25)
+
         return batch_image_raw, end - start
+        '''
 
     def destroy(self):
         # Remove any context from the top of the context stack, deactivating it.
@@ -164,6 +185,7 @@ class YoLov5TRT(object):
         im = im.transpose(2, 0, 1)
         # prepare batch
         batch_data = np.expand_dims(im, axis=0)
+
         return batch_data
 
     def postprocess_cls(self, output_data):
@@ -193,14 +215,29 @@ class inferThread(threading.Thread):
         batch_image_raw, use_time = self.yolov5_wrapper.infer(self.yolov5_wrapper.get_raw_image(self.image_path_batch))
 
         for i, img_path in enumerate(self.image_path_batch):
-
             parent, filename = os.path.split(img_path)
             save_name = os.path.join('output', filename)
             # Save image
             cv2.imwrite(save_name, batch_image_raw[i])
-            
-        print('input->{}, time->{:.2f}ms, saving into output/'.format(
-            self.image_path_batch, use_time * 1000))
+
+        print('input->{}, time->{:.2f}ms, saving into output/'.format(self.image_path_batch, use_time * 1000))
+
+
+class inferThread_R(threading.Thread):
+    def __init__(self, yolov5_wrapper, raw_image):
+        threading.Thread.__init__(self)
+        self.yolov5_wrapper = yolov5_wrapper
+        self.raw_image = raw_image
+
+    def run(self):
+        cls_type = self.yolov5_wrapper.infer(self.raw_image)
+
+        # 标注释
+        cv2.putText(self.raw_image, cls_type, (10, 40), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0), 1, cv2.LINE_AA)
+        # 显示读取到的这一帧画面
+        cv2.imshow('yolov5-cls', self.raw_image)
+        cv2.waitKey(25)
+
 
 
 class warmUpThread(threading.Thread):
@@ -209,41 +246,46 @@ class warmUpThread(threading.Thread):
         self.yolov5_wrapper = yolov5_wrapper
 
     def run(self):
-        batch_image_raw, use_time = self.yolov5_wrapper.infer(
-            self.yolov5_wrapper.get_raw_image_zeros())
-        print(
-            'warm_up->{}, time->{:.2f}ms'.format(batch_image_raw[0].shape, use_time * 1000))
+        print("warmUpThread done")
+'''
+        batch_image_raw, use_time = self.yolov5_wrapper.infer(self.yolov5_wrapper.get_raw_image_zeros())
+        print('warm_up->{}, time->{:.2f}ms'.format(batch_image_raw[0].shape, use_time * 1000))
+'''
 
-
+'''
+    Usage:
+        python yolov5_cls_trt.py  engine_path/xxx.engine  
+'''
 if __name__ == "__main__":
     # load custom plugin and engine
-    engine_file_path = "build/yolov5m-cls.engine"
+    engine_file_path = "/home/seeed/github/node-red-contrib-ml/src_cls/build/yolov5m-cls.engine"
+
+    source = ("v4l2src device=/dev/video0 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
+                    "jpegdec ! videoconvert ! video/x-raw ! appsink")
 
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
 
-    if os.path.exists('output/'):
-        shutil.rmtree('output/')
-    os.makedirs('output/')
+    # get stream source
+    dataloader = LoadStreams(source)
+
     # a YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
+
     try:
-        print('batch size is', yolov5_wrapper.batch_size)
-
-        image_dir = "samples/"
-        image_path_batches = get_img_path_batches(
-            yolov5_wrapper.batch_size, image_dir)
-
-        for i in range(10):
+        for i in range(5):
             # create a new thread to do warm_up
             thread1 = warmUpThread(yolov5_wrapper)
             thread1.start()
             thread1.join()
-        for batch in image_path_batches:
-            # create a new thread to do inference
-            thread1 = inferThread(yolov5_wrapper, batch)
-            thread1.start()
-            thread1.join()
+
+        for path, im, im0s, vid_cap, s in dataloader:
+            for img in im0s:
+                thread1 = inferThread_R(yolov5_wrapper, img)
+                thread1.start()
+                thread1.join()
+
     finally:
         # destroy the instance
         yolov5_wrapper.destroy()
+

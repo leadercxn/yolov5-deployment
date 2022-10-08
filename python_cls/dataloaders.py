@@ -196,7 +196,6 @@ class LoadStreams:
         self.stride = stride
         self.killed = False
         self.camera_exist = True
-        print("LoadStreams sources:",sources)
 
         if os.path.isfile(sources):
             with open(sources) as f:
@@ -223,7 +222,6 @@ class LoadStreams:
             #cap = cv2.VideoCapture("rtsp://admin:qqqqqqqq9@192.168.4.40:554/cam/realmonitor?channel=1&subtype=0")
             #cap = cv2.VideoCapture(f"v4l2src device=/dev/video{s} ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! jpegdec ! videoconvert ! video/x-raw ! appsink", cv2.CAP_GSTREAMER)
             LOGGER.info(s)
-            print("VideoCapture source : ",s)
             cap = cv2.VideoCapture(s)
 
             assert cap.isOpened(), f'{st}Failed to open {s}'
@@ -233,11 +231,10 @@ class LoadStreams:
             # TODO: current 9fps, neeed high fps 30
             self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')  # infinite stream fallback
 
-
-
             _, self.imgs[i] = cap.read()  # guarantee first frame
             self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
             LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
+            print("{} Success ({} frames {}x{} at {} FPS)".format(st, self.frames[i], w, h, self.fps[i]))
             self.threads[i].start()
         LOGGER.info('')  # newline
 
@@ -253,9 +250,9 @@ class LoadStreams:
         while cap.isOpened() and n < f and not self.killed:
             n += 1
             # _, self.imgs[index] = cap.read()
-            cap.grab()
+            cap.grab()  #用来指向下一帧
             if n % read == 0:
-                success, im = cap.retrieve()
+                success, im = cap.retrieve()    #用来解码
                 if success:
                     self.imgs[i] = im
                 # else:

@@ -126,7 +126,7 @@ class DataLoadderThread_R(threading.Thread):
                     source = ("v4l2src device=/dev/video0 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
                     "jpegdec ! videoconvert ! video/x-raw ! appsink")
                     
-#                   app.logger.info(source)
+                    app.logger.info(source)
                     dataloader = LoadStreams(source)  # Webcam
                     self.is_init = True
                     print("LoadStreams ing ...")
@@ -146,12 +146,13 @@ class DataLoadderThread_R(threading.Thread):
             counter = 0
             for path, im, im0s, vid_cap, s in dataloader:
                 for img in im0s:
+#                    cv2.imshow('frame', img)  # 显示读取到的这一帧画面
+#                    key = cv2.waitKey(20)     # 等待一段时间，并且检测键盘输入
                     if self.reset:
                         dataloader.killed = True
                         break
                     # img = cv2.resize(img, (1280,720), interpolation=cv2.INTER_LINEAR)
-                    ret_code, jpg_buffer = cv2.imencode(
-                        ".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality ])
+                    ret_code, jpg_buffer = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality ])
                     # sender.send_jpg(rpi_name, base64.b64encode(jpg_buffer))
 
                     self.data = jpg_buffer
@@ -188,6 +189,8 @@ if __name__ == "__main__":
     dataloader.start()
 
     print("pub_sub_broadcast_show ing ...")
+
+
 
     """
     @app.route('/health')
