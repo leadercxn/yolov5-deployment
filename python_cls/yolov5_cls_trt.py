@@ -233,10 +233,10 @@ class inferThread_R(threading.Thread):
         cls_type = self.yolov5_wrapper.infer(self.raw_image)
 
         # 标注释
-        cv2.putText(self.raw_image, cls_type, (10, 40), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(self.raw_image, cls_type, (10, 60), cv2.FONT_HERSHEY_COMPLEX, 2, (0, 0, 255), 2, cv2.LINE_AA)
         # 显示读取到的这一帧画面
         cv2.imshow('yolov5-cls', self.raw_image)
-        cv2.waitKey(25)
+        cv2.waitKey(30)
 
 
 
@@ -260,8 +260,16 @@ if __name__ == "__main__":
     # load custom plugin and engine
     engine_file_path = "/home/seeed/github/node-red-contrib-ml/src_cls/build/yolov5m-cls.engine"
 
-    source = ("v4l2src device=/dev/video0 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
-                    "jpegdec ! videoconvert ! video/x-raw ! appsink")
+#    # USB-Camera
+#    source = ("v4l2src device=/dev/video0 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
+#                    "jpegdec ! videoconvert ! video/x-raw ! appsink")
+
+    # Rtsp-IPCamera
+    source = ('rtspsrc location=rtsp://192.168.111.118:8554/live ! ''rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv !'
+               'video/x-raw,width=800,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink ')
+
+    # CSI-Camera
+
 
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
