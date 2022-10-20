@@ -255,11 +255,11 @@ if __name__ == "__main__":
 #                    "jpegdec ! videoconvert ! video/x-raw ! appsink")
 
     # Rtsp-IPCamera
-#    source = ('rtspsrc location=rtsp://192.168.111.118:8554/live ! ''rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv !'
-#               'video/x-raw,width=800,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink ')
+    source = ('rtspsrc location=rtsp://192.168.111.118:8554/live ! ''rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv !'
+               'video/x-raw,width=800,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink ')
 
     # CSI-Camera
-    source = ("nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink")
+#    source = ("nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink")
 
 #    args = parse_args()
 #    print("-e:%s" % args.engine)

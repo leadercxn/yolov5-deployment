@@ -7,6 +7,7 @@ import threading
 import time
 import cv2
 import numpy as np
+import torch
 import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
@@ -611,7 +612,6 @@ def parse_args():
     
     return args
 
-
 if __name__ == "__main__":
     args = parse_args()
 
@@ -622,77 +622,89 @@ if __name__ == "__main__":
 
     if model_type == 'detect':
         print("model_type={}".format(model_type))
-
         if args.lib :
             print("libmyplugins={}".format(args.lib))
             PLUGIN_LIBRARY = str(args.lib)
             ctypes.CDLL(PLUGIN_LIBRARY)
         else :
-            print("ERROR: Please choose libmyplugins.so in detection model")
-            # error
-
-        if interface == 'rtsp' :
-            print("interface={}".format(interface))
-            if not args.port:
-                print("ERROR: Please choose valid rtsp port")
-                # error
-            source = ( "rtspsrc location=rtsp://%s:%d/live ! rtph264depay ! "
-                       "h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,width=800,height=480,format=BGRx ! "
-                       "videoconvert ! video/x-raw,format=BGR ! appsink " 
-                        % (device, args.port) )
-        elif interface == 'usb':
-            print("interface={}".format(interface))
-
-            source = ("v4l2src device=/dev/video%d ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
-                      "jpegdec ! videoconvert ! video/x-raw ! appsink"
-                      % (device) )
-        elif interface == 'csi':
-            print("interface={}".format(interface))
-
-            source = ("nvarguscamerasrc sensor-id=%d ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! "
-                      "nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! "
-                      "videoconvert ! video/x-raw, format=(string)BGR ! appsink"
-                      % (device) )
-        else
-            print("ERROR: Invalid parameter --interface")
-
-
-        dataloader = LoadStreams(source)
-        yolov5_wrapper = YoLov5TRT_ObjectDection(engine_file_path)
-
+            sys.exit("ERROR: Please choose libmyplugins.so in detection model")
     elif model_type == 'cls':
         print("model_type={}".format(model_type))
+    else :
+        sys.exit("ERROR: Invalid parameter --type")
 
-        if interface == 'rtsp' :
-            print("interface={}".format(interface))
-            if not args.port:
-                print("ERROR: Please choose valid rtsp port")
-                # error
-            source = ( "rtspsrc location=rtsp://%s:%d/live ! rtph264depay ! "
-                       "h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,width=800,height=480,format=BGRx ! "
-                       "videoconvert ! video/x-raw,format=BGR ! appsink " 
-                        % (device, args.port) )
-        elif interface == 'usb':
-            print("interface={}".format(interface))
 
-            source = ("v4l2src device=/dev/video%d ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
-                      "jpegdec ! videoconvert ! video/x-raw ! appsink"
-                      % (device) )
-        elif interface == 'csi':
-            print("interface={}".format(interface))
+    if interface == 'rtsp' :
+        print("interface={}".format(interface))
+        if not args.port:
+            sys.exit("ERROR: Please choose valid rtsp port")
+        source = ( "rtspsrc location=rtsp://%s:%s/live ! rtph264depay ! "
+                   "h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,width=800,height=480,format=BGRx ! "
+                   "videoconvert ! video/x-raw,format=BGR ! appsink " 
+                    % (device, args.port) )
+    elif interface == 'usb':
+        print("interface={}".format(interface))
 
-            source = ("nvarguscamerasrc sensor-id=%d ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! "
-                      "nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! "
-                      "videoconvert ! video/x-raw, format=(string)BGR ! appsink"
-                      % (device) )
-        else
-            print("ERROR: Invalid parameter --interface")
+        source = ("v4l2src device=/dev/video%s ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
+                  "jpegdec ! videoconvert ! video/x-raw ! appsink"
+                    % (device) )
+    elif interface == 'csi':
+        print("interface={}".format(interface))
 
-        dataloader = LoadStreams(source)
-        yolov5_wrapper = YoLov5TRT_Classification(engine_file_path)
+        source = ("nvarguscamerasrc sensor-id=%s ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! "
+                  "nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! "
+                  "videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+                    % (device) )
+    else :
+        sys.exit("ERROR: Invalid parameter --interface")
+
+    dataloader = LoadStreams(source)
+
+    if model_type == 'detect':
+        yolov5_wrapper = YoLov5TRT_ObjectDection(engine_file_path)
 
     else :
-        print("Invalid parameter --type")
+        yolov5_wrapper = YoLov5TRT_Classification(engine_file_path)
+
+
+    try:
+        for path, im, im0s, vid_cap, s in dataloader:
+            for img in im0s:
+                if model_type == 'detect':
+                    thread1 = inferThread_ObjectDection(yolov5_wrapper, img)
+                else :
+                    thread1 = inferThread_Classification(yolov5_wrapper, img)
+                thread1.start()
+                thread1.join()
+
+    finally:
+        # destroy the instance
+        yolov5_wrapper.destroy()
+
+####
+# Usage :
+
+## Detection
+# USB Camera
+# python yolov5_infer.py -e /home/seeed/github/tensorrtx/yolov5/build/yolov5m.engine -l /home/seeed/github/tensorrtx/yolov5/build/libmyplugins.so -i usb -d 1 -t detect
+
+# CSI Camera
+# python yolov5_infer.py -e /home/seeed/github/tensorrtx/yolov5/build/yolov5m.engine -l /home/seeed/github/tensorrtx/yolov5/build/libmyplugins.so -i csi -d 0 -t detect
+
+# RTSP Camera
+# python yolov5_infer.py -e /home/seeed/github/tensorrtx/yolov5/build/yolov5m.engine -l /home/seeed/github/tensorrtx/yolov5/build/libmyplugins.so -i rtsp -d 192.168.111.118 -p 8081 -t detect
+
+
+## Classification
+# USB Camera
+# python yolov5_infer.py -e /home/seeed/github/tensorrtx/yolov5/build/yolov5m-cls.engine -i usb -d 1 -t cls
+
+# CSI Camera
+# python yolov5_infer.py -e /home/seeed/github/tensorrtx/yolov5/build/yolov5m-cls.engine -i csi -d 0 -t cls
+
+# USB Camera
+# python yolov5_infer.py -e /home/seeed/github/tensorrtx/yolov5/build/yolov5m-cls.engine -i rtsp -d 192.168.111.118 -p 8554 -t cls
 
 
 
+###
