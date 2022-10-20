@@ -640,7 +640,7 @@ if __name__ == "__main__":
             sys.exit("ERROR: Please choose valid rtsp port")
         source = ( "rtspsrc location=rtsp://%s:%s/live ! rtph264depay ! "
                    "h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,width=800,height=480,format=BGRx ! "
-                   "videoconvert ! video/x-raw,format=BGR ! appsink " 
+                   "videoconvert ! video/x-raw,format=BGR ! appsink "
                     % (device, args.port) )
     elif interface == 'usb':
         print("interface={}".format(interface))
