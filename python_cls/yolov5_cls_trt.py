@@ -204,25 +204,6 @@ class YoLov5TRT(object):
             classes_ls.append(classes[input_category_id])
         return classes_ls, predicted_conf_ls, category_id_ls
 
-
-class inferThread(threading.Thread):
-    def __init__(self, yolov5_wrapper, image_path_batch):
-        threading.Thread.__init__(self)
-        self.yolov5_wrapper = yolov5_wrapper
-        self.image_path_batch = image_path_batch
-
-    def run(self):
-        batch_image_raw, use_time = self.yolov5_wrapper.infer(self.yolov5_wrapper.get_raw_image(self.image_path_batch))
-
-        for i, img_path in enumerate(self.image_path_batch):
-            parent, filename = os.path.split(img_path)
-            save_name = os.path.join('output', filename)
-            # Save image
-            cv2.imwrite(save_name, batch_image_raw[i])
-
-        print('input->{}, time->{:.2f}ms, saving into output/'.format(self.image_path_batch, use_time * 1000))
-
-
 class inferThread_R(threading.Thread):
     def __init__(self, yolov5_wrapper, raw_image):
         threading.Thread.__init__(self)
@@ -237,8 +218,7 @@ class inferThread_R(threading.Thread):
         # 显示读取到的这一帧画面
         cv2.imshow('yolov5-cls', self.raw_image)
         cv2.waitKey(30)
-
-
+        
 
 class warmUpThread(threading.Thread):
     def __init__(self, yolov5_wrapper):
@@ -252,27 +232,42 @@ class warmUpThread(threading.Thread):
         print('warm_up->{}, time->{:.2f}ms'.format(batch_image_raw[0].shape, use_time * 1000))
 '''
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='choose .engine and video stream source to inference')
+    parser.add_argument('-e', '--engine', required=True      , help='Input engine (.engine) file path (required)')
+    parser.add_argument('-s', '--source', help='choose video stream source,default: /dev/video0')
+    parser.add_argument('--inference'   , action='store_true', help='engine model deserialize and run inference')
+
+    args = parser.parse_args()
+    
+    return args
+
 '''
     Usage:
         python yolov5_cls_trt.py  engine_path/xxx.engine  
 '''
 if __name__ == "__main__":
     # load custom plugin and engine
-    engine_file_path = "/home/seeed/github/node-red-contrib-ml/src_cls/build/yolov5m-cls.engine"
+    engine_file_path = "/home/seeed/github/tensorrtx/yolov5/build/yolov5m-cls.engine"
 
 #    # USB-Camera
-#    source = ("v4l2src device=/dev/video0 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
+#    source = ("v4l2src device=/dev/video1 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
 #                    "jpegdec ! videoconvert ! video/x-raw ! appsink")
 
     # Rtsp-IPCamera
-    source = ('rtspsrc location=rtsp://192.168.111.118:8554/live ! ''rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv !'
-               'video/x-raw,width=800,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink ')
+#    source = ('rtspsrc location=rtsp://192.168.111.118:8554/live ! ''rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv !'
+#               'video/x-raw,width=800,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink ')
 
     # CSI-Camera
+    source = ("nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink")
+
+#    args = parse_args()
+#    print("-e:%s" % args.engine)
+#    print("-s:%s" % args.source)
 
 
-    if len(sys.argv) > 1:
-        engine_file_path = sys.argv[1]
+#    if len(sys.argv) > 1:
+#        engine_file_path = sys.argv[1]
 
     # get stream source
     dataloader = LoadStreams(source)
