@@ -207,7 +207,7 @@ class LoadStreams:
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         self.auto = auto
-        for i, s in enumerate(sources):  # index, source
+        for i, s in enumerate(sources):  # index, source    # 从不同的源中获取数据
             # Start thread to read frames from video stream
             st = f'{i + 1}/{n}: {s}... '
             # if 'youtube.com/' in s or 'youtu.be/' in s:  # if source is YouTube video
@@ -231,11 +231,10 @@ class LoadStreams:
             # TODO: current 9fps, neeed high fps 30
             self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')  # infinite stream fallback
 
-
-
             _, self.imgs[i] = cap.read()  # guarantee first frame
             self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
             LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
+            print("{} Success ({} frames {}x{} at {} FPS)".format(st, self.frames[i], w, h, self.fps[i]))
             self.threads[i].start()
         LOGGER.info('')  # newline
 
@@ -251,9 +250,9 @@ class LoadStreams:
         while cap.isOpened() and n < f and not self.killed:
             n += 1
             # _, self.imgs[index] = cap.read()
-            cap.grab()
+            cap.grab()  #用来指向下一帧
             if n % read == 0:
-                success, im = cap.retrieve()
+                success, im = cap.retrieve()    #用来解码
                 if success:
                     self.imgs[i] = im
                 # else:
@@ -289,3 +288,8 @@ class LoadStreams:
 
     def __len__(self):
         return len(self.sources)  # 1E12 frames = 32 streams at 30 FPS for 30 years
+
+
+if __name__ == "__main__":
+    print("hello dataloader")
+    

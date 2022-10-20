@@ -13,39 +13,16 @@ import numpy as np
 import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
-import imagezmq
-import traceback
-import argparse
-import json
-import base64
 
+import argparse
 from multiprocessing import Process
 import subprocess
 import threading
-from flask import Flask
-from flask import request
-
 from dataloaders import LoadImages,LoadWebcam,LoadStreams
 
-import logging
-# logging.getLogger('werkzeug').disabled = True
-
-
-yolov5_wrapper = None
-app = Flask(__name__)
-host = ('0.0.0.0', 5560)
 
 CONF_THRESH = 0.5
 IOU_THRESHOLD = 0.4
-
-# JPEG quality, 0 - 100
-jpeg_quality = 95
-
-
-PLUGIN_LIBRARY = "build/libmyplugins.so"
-engine_file_path = "build/yolov5n.engine"
-ctypes.CDLL(PLUGIN_LIBRARY)
-
 
 
 def get_img_path_batches(batch_size, img_dir):
@@ -78,8 +55,7 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=None):
     tl = (
         line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1
     )  # line/font thickness
-    # color = color or [random.randint(0, 255) for _ in range(3)]
-    color = [255,0,0]
+    color = color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
     cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
     if label:
@@ -152,11 +128,8 @@ class YoLov5TRT(object):
         self.bindings = bindings
         self.batch_size = engine.max_batch_size
 
-        
-
-
     def infer(self, raw_image_generator):
-        # threading.Thread.__init__(self)
+        threading.Thread.__init__(self)
         # Make self the active context, pushing it on top of the context stack.
         self.ctx.push()
         # Restore
@@ -172,35 +145,26 @@ class YoLov5TRT(object):
         batch_image_raw = []
         batch_origin_h = []
         batch_origin_w = []
-        # batch_input_image = np.empty(shape=[self.batch_size, 3, self.input_h, self.input_w])
-        # for i, image_raw in enumerate(raw_image_generator):
-        #     input_image, image_raw, origin_h, origin_w = self.preprocess_image(image_raw)
-        #     batch_image_raw.append(image_raw)
-        #     batch_origin_h.append(origin_h)
-        #     batch_origin_w.append(origin_w)
-        #     np.copyto(batch_input_image[i], input_image)
-        # batch_input_image = np.ascontiguousarray(batch_input_image)
-
         batch_input_image = np.empty(shape=[self.batch_size, 3, self.input_h, self.input_w])
+        '''
+        for i, image_raw in enumerate(raw_image_generator):
+            input_image, image_raw, origin_h, origin_w = self.preprocess_image(image_raw)
+            batch_image_raw.append(image_raw)
+            batch_origin_h.append(origin_h)
+            batch_origin_w.append(origin_w)
+            np.copyto(batch_input_image[i], input_image)
+        '''
         input_image, image_raw, origin_h, origin_w = self.preprocess_image(raw_image_generator)
         batch_image_raw.append(image_raw)
         batch_origin_h.append(origin_h)
         batch_origin_w.append(origin_w)
         np.copyto(batch_input_image, input_image)
+
         batch_input_image = np.ascontiguousarray(batch_input_image)
 
-
-
-        # batch_origin_h.append(raw_image_generator.shape[1])
-        # batch_origin_w.append(raw_image_generator.shape[2])
-        # raw_image_generator = raw_image_generator / 255
-        # raw_image_generator = raw_image_generator[None]
-
-
         # Copy input image to host buffer
-        #np.copyto(host_inputs[0], raw_image_generator.ravel())
         np.copyto(host_inputs[0], batch_input_image.ravel())
-
+        start = time.time()
         # Transfer input data  to the GPU.
         cuda.memcpy_htod_async(cuda_inputs[0], host_inputs[0], stream)
         # Run inference.
@@ -209,6 +173,7 @@ class YoLov5TRT(object):
         cuda.memcpy_dtoh_async(host_outputs[0], cuda_outputs[0], stream)
         # Synchronize the stream
         stream.synchronize()
+        end = time.time()
         # Remove any context from the top of the context stack, deactivating it.
         self.ctx.pop()
         # Here we use the first row of output in that batch_size = 1
@@ -216,19 +181,9 @@ class YoLov5TRT(object):
         # Do postprocess
         for i in range(self.batch_size):
             result_boxes, result_scores, result_classid = self.post_process(
-                output[i * 6001: (i + 1) * 6001], batch_origin_h[i], batch_origin_w[i]
-            )
-            # Draw rectangles and labels on the original image
-            # for j in range(len(result_boxes)):
-            #     box = result_boxes[j]
-            #     plot_one_box(
-            #         box,
-            #         batch_image_raw[i],
-            #         label="{}:{:.2f}".format(
-            #             categories[int(result_classid[j])], result_scores[j]
-            #         ),
-            #     )
-        return result_boxes, result_scores, result_classid, result
+                output[i * 6001: (i + 1) * 6001], batch_origin_h[i], batch_origin_w[i])
+ #       print("result_boxes={}, result_scores={}, result_classid={}, result={}".format(result_boxes, result_scores, result_classid, result))
+        return result_boxes, result_scores, result_classid, result   
 
     def destroy(self):
         # Remove any context from the top of the context stack, deactivating it.
@@ -240,13 +195,13 @@ class YoLov5TRT(object):
         """
         for img_path in image_path_batch:
             yield cv2.imread(img_path)
-
-
+        
     def get_raw_image_zeros(self, image_path_batch=None):
         """
         description: Ready data for warmup
         """
-        return np.zeros([self.input_h, self.input_w, 3], dtype=np.uint8)
+        for _ in range(self.batch_size):
+            yield np.zeros([self.input_h, self.input_w, 3], dtype=np.uint8)
 
     def preprocess_image(self, raw_bgr_image):
         """
@@ -423,120 +378,94 @@ class YoLov5TRT(object):
         return boxes
 
 
+class inferThread(threading.Thread):
+    def __init__(self, yolov5_wrapper, raw_image):
+        threading.Thread.__init__(self)
+        self.yolov5_wrapper = yolov5_wrapper
+        self.raw_image = raw_image
 
-class TRTAPI(object):
-    def __init__(self):
-        self.yolov5 = YoLov5TRT(engine_file_path)
-            # load coco labels
+        # load coco labels
         self.categories = ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-                    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-                    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-                    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-                    "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-                    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-                    "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-                    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-                    "hair drier", "toothbrush"]
-
-        app.logger.info(f"TRTAPI init ....")
-
-        self.is_busy = False
-        self.latest_result = "Nonthing", 200, [("vision", str({"boxes":[],"scores":[],"labels":[]})),("busy",1)]
-
+            "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+            "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+            "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+            "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+            "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+            "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+            "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
+            "hair drier", "toothbrush"]
         
 
+    def run(self):
+        result_boxes, result_scores, result_classid, ret = self.yolov5_wrapper.infer(self.raw_image)
 
-    def run(self, base64_image, showResult):
-        try:
+        if ret and ret != 'false':
+            # print(str(obj))
+            # print('real infer, time->{:.2f}ms'.format(t * 1000))
+            for j in range(len(result_boxes)):
+                box = result_boxes[j]
+                plot_one_box(
+                    box,
+                    self.raw_image,
+                    label="{}:{:.2f}".format(
+                        self.categories[int(result_classid[j])], result_scores[j]
+                    ),
+                )
 
-            if self.is_busy :
-                return  "Nonthing", 200, [("vision", str({"boxes":[],"scores":[],"labels":[]})),("busy",1)]
-            
-            self.is_busy = True
-            start = time.time()
-            # get request img
-            app.logger.info(f"request base64 image time {(time.time() - start) * 1000} ms")
+            cv2.imshow('yolov5-detection', self.raw_image)
+            cv2.waitKey(20)
+        else:
+            obj = {"boxes":[],"scores":[],"labels":[]}
+            print("No suit categories")
 
 
-            request_image = base64.b64decode(base64_image)
+          
 
+class warmUpThread(threading.Thread):
+    def __init__(self, yolov5_wrapper):
+        threading.Thread.__init__(self)
+        self.yolov5_wrapper = yolov5_wrapper
 
-            # analyze img
-            image = cv2.imdecode(np.frombuffer(request_image, dtype='uint8'), -1)
-            
-            result_boxes, result_scores, result_classid, ret = self.yolov5.infer(image)
-            app.logger.info(f"image shape:{image.shape}  infer time {(time.time() - start) * 1000} ms")
-
-            start = time.time()
-            if ret and showResult != 'false':
-                obj = {"boxes":[],"scores":[],"labels":[]}
-                for j in range(len(result_boxes)):
-                    obj["boxes"].append(result_boxes[j].astype(int).tolist())
-                    obj["scores"].append((result_scores[j]*100).astype(int).tolist())
-                    obj["labels"].append(self.categories[int(result_classid[j])])
-
-                # print(str(obj))
-                # print('real infer, time->{:.2f}ms'.format(t * 1000))
-                for j in range(len(result_boxes)):
-                    box = result_boxes[j]
-                    plot_one_box(
-                        box,
-                        image,
-                        label="{}:{:.2f}".format(
-                            self.categories[int(result_classid[j])], result_scores[j]
-                        ),
-                    )
-
-                ret_code, jpg_buffer = cv2.imencode(
-                        ".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
-            else:
-                obj = {"boxes":[],"scores":[],"labels":[]}
-                ret_code, jpg_buffer = cv2.imencode(
-                        ".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])        
-
-            self.latest_result = base64.b64encode(jpg_buffer), 200, [("vision", str(obj)),("busy",0)]
-
-            self.is_busy = False
-            
-            app.logger.info(f"post process time: {(time.time() - start) * 1000} ms")
-            # app.logger.info(f"latest result:{self.latest_result}")
-            return self.latest_result
-            
-        except (KeyboardInterrupt, SystemExit):
-            print('Exit due to keyboard interrupt')
-            return "err"
-        except Exception as ex:
-            print('Python error with no Exception handler:')
-            print('Traceback error:', ex)
-            traceback.print_exc()
-            self.yolov5.destroy()
-            return "err"
+    def run(self):
+        print("warmUpThread done")
 
 
 if __name__ == "__main__":
-    trtapp = []
+    # load custom plugin and engine
+    PLUGIN_LIBRARY = "/home/seeed/github/tensorrtx/yolov5/build/libmyplugins.so"
+    engine_file_path = "/home/seeed/github/tensorrtx/yolov5/build/yolov5m.engine"
 
-    for _ in range(3):
-        trtapp.append(TRTAPI())
+#    # USB-Camera
 
-    @app.route('/health')
-    def http_get_request_health():
-        return 'ok'
+#    source = ("v4l2src device=/dev/video1 ! image/jpeg,framerate=30/1,width=640, height=480,type=video ! "
+#                    "jpegdec ! videoconvert ! video/x-raw ! appsink")
 
-    @app.route('/config')
-    def http_request_config():
-        return 'hello world'
+    # CSI-Camera
+    source = ("nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, width=(int)640, height=(int)480, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink")
 
-    @app.route('/',methods=["POST"])
-    def http_request_delector():
-        modelName = request.headers.get('modelName')
-        showResult = request.headers.get('showResult')
-        app.logger.info(f"modelName:{modelName} showResult:{showResult}")
-        request_base64_image = request.get_data()
-        for i in range(3):
-            if not trtapp[i].is_busy:
-                app.logger.info(f"current infer engine: {i} ")
-                return trtapp[i].run(request_base64_image, showResult)
-        return "Nonthing", 200, [("vision", str({"boxes": [], "scores": [], "labels": []})), ("busy", 1)]
+#    source = ('rtspsrc location=rtsp://192.168.111.118:8554/live ! ''rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv !'
+#               'video/x-raw,width=800,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink ')
 
-    app.run(host="0.0.0.0", port=5560)
+    ctypes.CDLL(PLUGIN_LIBRARY)
+
+    # get stream source
+    dataloader = LoadStreams(source)
+
+    # a YoLov5TRT instance
+    yolov5_wrapper = YoLov5TRT(engine_file_path)
+    try:
+        for i in range(10):
+            # create a new thread to do warm_up
+            thread1 = warmUpThread(yolov5_wrapper)
+            thread1.start()
+            thread1.join()
+
+        for path, im, im0s, vid_cap, s in dataloader:
+            for img in im0s:
+                # create a new thread to do inference
+                thread1 = inferThread(yolov5_wrapper, img)
+                thread1.start()
+                thread1.join()
+    finally:
+        # destroy the instance
+        yolov5_wrapper.destroy()
